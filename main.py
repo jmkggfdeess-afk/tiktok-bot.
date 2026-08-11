@@ -5,9 +5,8 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, CommandStart
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-# التوكن والرقم الخاص بك
 TOKEN = "7344257430:AAFgBLSeVOzLl0IYr1xWD3FY-2lRyz9g5OU"
-ADMIN_ID = 6037220399  # تم وضع الآيدي الخاص بك هنا
+ADMIN_ID = 6037220399
 
 db_path = "bot_database.db"
 
