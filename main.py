@@ -4,18 +4,16 @@ import telebot
 from flask import Flask
 from threading import Thread
 
-# سيرفر وهمي لإبقاء الخدمة نشطة على Render
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is active!"
+    return "Bot is online!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# توكن البوت
 TELEGRAM_TOKEN = "7344257430:AAGnlTxGH_AZ0B9S7bNX6ZRg8H02XU4lSuM"
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
@@ -33,22 +31,27 @@ def download_tiktok(message):
 
     msg = bot.reply_to(message, "⏳ جاري تحميل الفيديو بدون علامة مائية...")
 
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+    })
 
     try:
-        # استخدام TikWM API لتخطي حماية وسيرفرات تيك توك مباشرة
-        api_url = f"https://www.tikwm.com/api/?url={url_text}"
-        response = requests.get(api_url, headers=headers, timeout=15).json()
+        # جلب رابط الفيديو المباشر عن طريق POST لتجاوز القيود
+        response = session.post(
+            "https://www.tikwm.com/api/",
+            data={'url': url_text, 'count': 12, 'cursor': 0, 'web': 1, 'hd': 1},
+            timeout=20
+        ).json()
 
         if response.get("code") == 0 and "data" in response:
             video_data = response["data"]
-            # رابط الفيديو بدون علامة مائية
-            play_url = video_data.get("play") or video_data.get("wmplay")
+            play_url = video_data.get("hdplay") or video_data.get("play") or video_data.get("wmplay")
             
             if play_url:
-                # إضافة السيرفر كمصدر للرابط عند الحاجة
                 if not play_url.startswith("http"):
                     play_url = "https://www.tikwm.com" + play_url
 
@@ -61,14 +64,14 @@ def download_tiktok(message):
                 return
 
         bot.edit_message_text(
-            "❌ تعذر تحميل الفيديو. تأكد من أن الرابط صحيح وأن الحساب ليس خاصاً.", 
+            "❌ تعذر استخراج الفيديو. تأكد من أن الرابط يعمل والحساب ليس خاصاً.", 
             chat_id=message.chat.id, 
             message_id=msg.message_id
         )
 
-    except Exception as e:
+    except Exception:
         bot.edit_message_text(
-            "⚠️ حدث خطأ في الاتصال، يرجى إعادة محاولة إرسال الرابط مرة أخرى.", 
+            "❌ تعذر الاتصال بالسيرفر حالياً، يرجى المحاولة مرة أخرى.", 
             chat_id=message.chat.id, 
             message_id=msg.message_id
         )
