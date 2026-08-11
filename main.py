@@ -1,82 +1,101 @@
-import os
-import requests
-import telebot
-from flask import Flask
-from threading import Thread
+import asyncio
+import logging
+import aiosqlite
+from aiogram import Bot, Dispatcher, F, types
+from aiogram.filters import Command, CommandStart
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-app = Flask(__name__)
+# التوكن والرقم الخاص بك
+TOKEN = "7344257430:AAFgBLSeVOzLl0IYr1xWD3FY-2lRyz9g5OU"
+ADMIN_ID = 6037220399  # تم وضع الآيدي الخاص بك هنا
 
-@app.route('/')
-def home():
-    return "Bot is online!"
+db_path = "bot_database.db"
 
-def run_web():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
 
-TELEGRAM_TOKEN = "7344257430:AAGnlTxGH_AZ0B9S7bNX6ZRg8H02XU4lSuM"
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
+async def init_db():
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                balance INTEGER DEFAULT 0,
+                referrals_count INTEGER DEFAULT 0
+            )
+        """)
+        await db.commit()
 
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "👋 أهلاً بك! أرسل لي أي رابط فيديو من تيك توك وسأقوم بتحميله لك فوراً وبدون علامة مائية 🎬")
+@dp.message(CommandStart())
+async def cmd_start(message: types.Message):
+    user_id = message.from_user.id
+    args = message.text.split()
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            user = await cursor.fetchone()
+        if not user:
+            await db.execute("INSERT INTO users (user_id, balance, referrals_count) VALUES (?, 0, 0)", (user_id,))
+            await db.commit()
+            if len(args) > 1:
+                try:
+                    referrer_id = int(args[1])
+                    if referrer_id != user_id:
+                        async with db.execute("SELECT user_id FROM users WHERE user_id = ?", (referrer_id,)) as cursor:
+                            ref_exists = await cursor.fetchone()
+                        if ref_exists:
+                            await db.execute("UPDATE users SET balance = balance + 100, referrals_count = referrals_count + 1 WHERE user_id = ?", (referrer_id,))
+                            await db.commit()
+                            try: await bot.send_message(referrer_id, "🎉 انضم شخص جديد عبر رابط الدعوة الخاص بك! تم إضافة 100 نقطة إلى رصيدك.")
+                            except: pass
+                except ValueError: pass
 
-@bot.message_handler(func=lambda message: True)
-def download_tiktok(message):
-    url_text = message.text.strip()
-    
-    if "tiktok.com" not in url_text:
-        bot.reply_to(message, "⚠️ من فضلك أرسل رابط تيك توك صحيح.")
-        return
+    builder = InlineKeyboardBuilder()
+    builder.button(text="👤 رصيدي وإحصائياتي", callback_data="my_balance")
+    builder.button(text="🔗 رابط الدعوة الخاص بي", callback_data="get_ref_link")
+    builder.button(text="💸 طلب سحب الأرباح", callback_data="request_withdraw")
+    builder.adjust(1)
+    await message.answer("مرحباً بك في بوت الأرباح! قم بدعوة أصدقائك واربح 100 نقطة عن كل شخص.", reply_markup=builder.as_markup())
 
-    msg = bot.reply_to(message, "⏳ جاري تحميل الفيديو بدون علامة مائية...")
+@dp.callback_query(F.data == "my_balance")
+async def show_balance(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute("SELECT balance, referrals_count FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            balance, refs = row if row else (0, 0)
+    await callback.message.edit_text(f"📊 رصيدك: {balance} نقطة\n👥 دعوت: {refs} شخص", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_home")]]))
 
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
-    })
+@dp.callback_query(F.data == "get_ref_link")
+async def get_ref_link(callback: types.CallbackQuery):
+    bot_info = await bot.get_me()
+    ref_link = f"https://t.me/{bot_info.username}?start={callback.from_user.id}"
+    await callback.message.edit_text(f"🔗 رابط الدعوة الخاص بك:\n`{ref_link}`", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_home")]]))
 
-    try:
-        # جلب رابط الفيديو المباشر عن طريق POST لتجاوز القيود
-        response = session.post(
-            "https://www.tikwm.com/api/",
-            data={'url': url_text, 'count': 12, 'cursor': 0, 'web': 1, 'hd': 1},
-            timeout=20
-        ).json()
+@dp.callback_query(F.data == "request_withdraw")
+async def request_withdraw(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            balance = row[0] if row else 0
+    if balance < 10000:
+        await callback.answer("عذراً، يجب أن تصل لـ 10,000 نقطة للسحب.", show_alert=True)
+    else:
+        await callback.message.edit_text("✅ تم إرسال طلب السحب للإدارة.", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_home")]]))
+        await bot.send_message(ADMIN_ID, f"🔔 طلب سحب جديد من: {user_id}")
 
-        if response.get("code") == 0 and "data" in response:
-            video_data = response["data"]
-            play_url = video_data.get("hdplay") or video_data.get("play") or video_data.get("wmplay")
-            
-            if play_url:
-                if not play_url.startswith("http"):
-                    play_url = "https://www.tikwm.com" + play_url
+@dp.callback_query(F.data == "back_home")
+async def back_home(callback: types.CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="👤 رصيدي وإحصائياتي", callback_data="my_balance")
+    builder.button(text="🔗 رابط الدعوة الخاص بي", callback_data="get_ref_link")
+    builder.button(text="💸 طلب سحب الأرباح", callback_data="request_withdraw")
+    builder.adjust(1)
+    await callback.message.edit_text("القائمة الرئيسية:", reply_markup=builder.as_markup())
 
-                bot.send_video(
-                    message.chat.id, 
-                    play_url, 
-                    caption="✅ تم التحميل بنجاح بدون علامة مائية!"
-                )
-                bot.delete_message(chat_id=message.chat.id, message_id=msg.message_id)
-                return
-
-        bot.edit_message_text(
-            "❌ تعذر استخراج الفيديو. تأكد من أن الرابط يعمل والحساب ليس خاصاً.", 
-            chat_id=message.chat.id, 
-            message_id=msg.message_id
-        )
-
-    except Exception:
-        bot.edit_message_text(
-            "❌ تعذر الاتصال بالسيرفر حالياً، يرجى المحاولة مرة أخرى.", 
-            chat_id=message.chat.id, 
-            message_id=msg.message_id
-        )
+async def main():
+    await init_db()
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    t = Thread(target=run_web)
-    t.start()
-    bot.infinity_polling()
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(main())
