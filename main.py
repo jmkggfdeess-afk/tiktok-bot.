@@ -27,7 +27,9 @@ async def init_db():
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
+    name = message.from_user.first_name
     args = message.text.split()
+    
     async with aiosqlite.connect(db_path) as db:
         async with db.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,)) as cursor:
             user = await cursor.fetchone()
@@ -43,16 +45,34 @@ async def cmd_start(message: types.Message):
                         if ref_exists:
                             await db.execute("UPDATE users SET balance = balance + 100, referrals_count = referrals_count + 1 WHERE user_id = ?", (referrer_id,))
                             await db.commit()
-                            try: await bot.send_message(referrer_id, "🎉 انضم شخص جديد عبر رابط الدعوة الخاص بك! تم إضافة 100 نقطة إلى رصيدك.")
+                            try: 
+                                await bot.send_message(
+                                    referrer_id, 
+                                    "<b>🔥 انضم شخص جديد عبر رابط الدعوة الخاص بك!</b>\n\n"
+                                    "🎁 تم إضافة <b>+100 نقطة</b> إلى رصيدك بنجاح.",
+                                    parse_mode="HTML"
+                                )
                             except: pass
                 except ValueError: pass
 
     builder = InlineKeyboardBuilder()
-    builder.button(text="👤 رصيدي وإحصائياتي", callback_data="my_balance")
-    builder.button(text="🔗 رابط الدعوة الخاص بي", callback_data="get_ref_link")
-    builder.button(text="💸 طلب سحب الأرباح", callback_data="request_withdraw")
+    builder.button(text="👤 ⟸ لـوحـة الحـسـاب والـإحـصـائـيـات", callback_data="my_balance")
+    builder.button(text="🔗 ⟸ الحـصـول عـلـى رابـط الـدعـوة", callback_data="get_ref_link")
+    builder.button(text="💸 ⟸ طـلـب سـحـب الـأربـاح", callback_data="request_withdraw")
     builder.adjust(1)
-    await message.answer("مرحباً بك في بوت الأرباح! قم بدعوة أصدقائك واربح 100 نقطة عن كل شخص.", reply_markup=builder.as_markup())
+    
+    welcome_msg = (
+        f"<b>✨ أهلاً بك يا {name} في بوت الأرباح الرقمية!</b>\n\n"
+        "<i>🤖 منصتك الذكية لجمع النقاط وتحويلها إلى أرباح حقيقية بكل سهولة.</i>\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "💡 <b>طريقة العمل:</b>\n"
+        "• قم بنسخ رابط الدعوة الخاص بك.\n"
+        "• انشره بين أصدقائك وفي المجموعات.\n"
+        "• اربح <b>100 نقطة</b> عن كل شخص ينضم عبر رابطك!\n"
+        "━━━━━━━━━━━━━━━━━━"
+    )
+    
+    await message.answer(welcome_msg, parse_mode="HTML", reply_markup=builder.as_markup())
 
 @dp.callback_query(F.data == "my_balance")
 async def show_balance(callback: types.CallbackQuery):
@@ -61,13 +81,38 @@ async def show_balance(callback: types.CallbackQuery):
         async with db.execute("SELECT balance, referrals_count FROM users WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
             balance, refs = row if row else (0, 0)
-    await callback.message.edit_text(f"📊 رصيدك: {balance} نقطة\n👥 دعوت: {refs} شخص", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_home")]]))
+            
+    remaining = max(0, 10000 - balance)
+    
+    balance_msg = (
+        "📊 <b>إحصائيات حسـابك الشخصي:</b>\n\n"
+        f"💰 <b>الرصيد الحالي:</b> <code>{balance}</code> نقطة\n"
+        f"👥 <b>الأصدقاء المدعوون:</b> <code>{refs}</code> شخص\n"
+        f"🎯 <b>المتبقي للحد الأدنى (10,000):</b> <code>{remaining}</code> نقطة\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "⚡ <i>استمر في دعوة أصدقائك للوصول إلى هدف السحب سريعاً!</i>"
+    )
+    
+    back_btn = InlineKeyboardBuilder()
+    back_btn.button(text="🔙 ⟸ العـودة للقـائـمة الـرئيـسـيـة", callback_data="back_home")
+    
+    await callback.message.edit_text(balance_msg, parse_mode="HTML", reply_markup=back_btn.as_markup())
 
 @dp.callback_query(F.data == "get_ref_link")
 async def get_ref_link(callback: types.CallbackQuery):
     bot_info = await bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start={callback.from_user.id}"
-    await callback.message.edit_text(f"🔗 رابط الدعوة الخاص بك:\n`{ref_link}`", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_home")]]))
+    
+    link_msg = (
+        "🔗 <b>رابط الدعوة الخاص بك:</b>\n\n"
+        f"<code>{ref_link}</code>\n\n"
+        "📋 <i>قم بالضغط على الرابط أعلاه لنسخه تلقائياً، ثم شاركه مع أصدقائك واكسب المكافآت فوراً!</i>"
+    )
+    
+    back_btn = InlineKeyboardBuilder()
+    back_btn.button(text="🔙 ⟸ العـودة للقـائـمة الـرئيـسـيـة", callback_data="back_home")
+    
+    await callback.message.edit_text(link_msg, parse_mode="HTML", reply_markup=back_btn.as_markup())
 
 @dp.callback_query(F.data == "request_withdraw")
 async def request_withdraw(callback: types.CallbackQuery):
@@ -76,20 +121,30 @@ async def request_withdraw(callback: types.CallbackQuery):
         async with db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
             balance = row[0] if row else 0
+            
+    back_btn = InlineKeyboardBuilder()
+    back_btn.button(text="🔙 ⟸ العـودة للقـائـمة الـرئيـسـيـة", callback_data="back_home")
+
     if balance < 10000:
-        await callback.answer("عذراً، يجب أن تصل لـ 10,000 نقطة للسحب.", show_alert=True)
+        await callback.answer("❌ عذراً، رصيدك لم يبلغ الحد الأدنى للسحب (10,000 نقطة).", show_alert=True)
     else:
-        await callback.message.edit_text("✅ تم إرسال طلب السحب للإدارة.", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_home")]]))
-        await bot.send_message(ADMIN_ID, f"🔔 طلب سحب جديد من: {user_id}")
+        success_msg = (
+            "✅ <b>تم تقديم طلب السحب بنجاح!</b>\n\n"
+            "⏳ <i>جاري مراجعة حسابك من قبل الإدارة وتحويل الأرباح في أقرب وقت. شكراً لثقتك بنا.</i>"
+        )
+        await callback.message.edit_text(success_msg, parse_mode="HTML", reply_markup=back_btn.as_מברوك if hasattr(back_btn, 'as_מברوك') else back_btn.as_markup())
+        await bot.send_message(ADMIN_ID, f"🔔 <b>طلب سحب جديد!</b>\n👤 الآيدي: <code>{user_id}</code>\n💰 الرصيد: <code>{balance}</code> نقطة", parse_mode="HTML")
 
 @dp.callback_query(F.data == "back_home")
 async def back_home(callback: types.CallbackQuery):
     builder = InlineKeyboardBuilder()
-    builder.button(text="👤 رصيدي وإحصائياتي", callback_data="my_balance")
-    builder.button(text="🔗 رابط الدعوة الخاص بي", callback_data="get_ref_link")
-    builder.button(text="💸 طلب سحب الأرباح", callback_data="request_withdraw")
+    builder.button(text="👤 ⟸ لـوحـة الحـسـاب والـإحـصـائـيـات", callback_data="my_balance")
+    builder.button(text="🔗 ⟸ الحـصـول عـلـى رابـط الـدعـوة", callback_data="get_ref_link")
+    builder.button(text="💸 ⟸ طـلـب سـحـب الـأربـاح", callback_data="request_withdraw")
     builder.adjust(1)
-    await callback.message.edit_text("القائمة الرئيسية:", reply_markup=builder.as_markup())
+    
+    home_msg = "<b>✨ القائمة الرئيسية للبوت:</b>\n\n<i>اختر أحد الخيارات أدناه للمتابعة:</i>"
+    await callback.message.edit_text(home_msg, parse_mode="HTML", reply_markup=builder.as_markup())
 
 async def main():
     await init_db()
