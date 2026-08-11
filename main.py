@@ -2,6 +2,7 @@ import asyncio
 import logging
 import random
 import aiosqlite
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, CommandStart
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -13,6 +14,18 @@ db_path = "bot_database.db"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
+
+# --- خادم ويب وهمي لإرضاء موقع Render وتجنب خطأ Timed Out ---
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+async def web_server():
+    app = web.Application()
+    app.add_routes([web.get("/", handle)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 10000)
+    await site.start()
 
 async def init_db():
     async with aiosqlite.connect(db_path) as db:
@@ -33,7 +46,6 @@ async def init_db():
         """)
         await db.commit()
 
-# لوحة التحكم الرئيسية مع جميع الميزات
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="👤 حسابي وإحصائياتي", callback_data="my_balance")
@@ -92,7 +104,6 @@ async def back_home(callback: types.CallbackQuery):
     home_msg = "🚀 **القائمة الرئيسية للبوت:**\nاختر ما تحب فعله أدناه:"
     await callback.message.edit_text(home_msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
-# --- 1. حسابي وإحصائياتي ---
 @dp.callback_query(F.data == "my_balance")
 async def show_balance(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -114,7 +125,6 @@ async def show_balance(callback: types.CallbackQuery):
     back_btn.button(text="🔙 رجوع للقائمة الرئيسية", callback_data="back_home")
     await callback.message.edit_text(balance_msg, parse_mode="Markdown", reply_markup=back_btn.as_markup())
 
-# --- 2. رابط الدعوة ---
 @dp.callback_query(F.data == "get_ref_link")
 async def get_ref_link(callback: types.CallbackQuery):
     bot_info = await bot.get_me()
@@ -130,7 +140,6 @@ async def get_ref_link(callback: types.CallbackQuery):
     back_btn.button(text="🔙 رجوع للقائمة الرئيسية", callback_data="back_home")
     await callback.message.edit_text(link_msg, parse_mode="Markdown", reply_markup=back_btn.as_markup())
 
-# --- 3. عجلة الحظ اليومية ---
 @dp.callback_query(F.data == "spin_wheel")
 async def spin_wheel(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -146,7 +155,6 @@ async def spin_wheel(callback: types.CallbackQuery):
             await callback.answer("⏳ لقد استخدمت عجلة الحظ اليوم! عد غداً لتجربة حظك من جديد.", show_alert=True)
             return
             
-        # جائزة عشوائية
         reward = random.choice([25, 50, 100, 150, 200, 300])
         await db.execute("UPDATE users SET balance = balance + ?, last_spin = ? WHERE user_id = ?", (reward, today, user_id))
         await db.commit()
@@ -160,7 +168,6 @@ async def spin_wheel(callback: types.CallbackQuery):
         parse_mode="Markdown", reply_markup=back_btn.as_markup()
     )
 
-# --- 4. الهدية اليومية ---
 @dp.callback_query(F.data == "daily_bonus")
 async def daily_bonus(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -176,7 +183,7 @@ async def daily_bonus(callback: types.CallbackQuery):
             await callback.answer("⏳ لقد استلمت هدديتك اليومية مسبقاً، انتظر حتى الغد!", show_alert=True)
             return
             
-        reward = 50  # هدية ثابتة أو تراكمية يومية
+        reward = 50
         await db.execute("UPDATE users SET balance = balance + ?, last_daily = ? WHERE user_id = ?", (reward, today, user_id))
         await db.commit()
         
@@ -189,13 +196,11 @@ async def daily_bonus(callback: types.CallbackQuery):
         parse_mode="Markdown", reply_markup=back_btn.as_markup()
     )
 
-# --- 5. لعبة تخمين الرقم ---
 @dp.callback_query(F.data == "guess_game")
 async def guess_game(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    # لعبة سريعة: تخمين رقم بين 1 و 3
     chosen = random.randint(1, 3)
-    user_guess = random.randint(1, 3) # محاكاة تخمين أو ربح سريع
+    user_guess = random.randint(1, 3)
     
     if user_guess == chosen:
         win_reward = 150
@@ -213,7 +218,6 @@ async def guess_game(callback: types.CallbackQuery):
     
     await callback.message.edit_text(msg, parse_mode="Markdown", reply_markup=back_btn.as_markup())
 
-# --- 6. لوحة المتصدرين ---
 @dp.callback_query(F.data == "top_users")
 async def top_users(callback: types.CallbackQuery):
     async with aiosqlite.connect(db_path) as db:
@@ -229,7 +233,6 @@ async def top_users(callback: types.CallbackQuery):
     back_btn.button(text="🔙 رجوع للقائمة الرئيسية", callback_data="back_home")
     await callback.message.edit_text(top_text, parse_mode="Markdown", reply_markup=back_btn.as_markup())
 
-# --- 7. نظام الكوبونات (للزوار والمستخدمين) ---
 @dp.callback_query(F.data == "enter_coupon")
 async def enter_coupon_prompt(callback: types.CallbackQuery):
     await callback.message.edit_text(
@@ -241,26 +244,18 @@ async def enter_coupon_prompt(callback: types.CallbackQuery):
 
 @dp.message(F.text & ~F.text.startswith("/"))
 async def handle_text_messages(message: types.Message):
-    # إذا أرسل المستخدم كود كوبون
     code = message.text.strip()
     user_id = message.from_user.id
-    
     async with aiosqlite.connect(db_path) as db:
         async with db.execute("SELECT reward FROM coupons WHERE code = ?", (code,)) as cursor:
             coupon = await cursor.fetchone()
-            
         if coupon:
             reward = coupon[0]
-            # حذف الكوبون لكي لا يُستعمل مرتين (أو يمكن إبقاؤه حسب رغبتك)
             await db.execute("DELETE FROM coupons WHERE code = ?", (code,))
             await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (reward, user_id))
             await db.commit()
             await message.answer(f"🎉 **مبروك! تم تفعيل الكوبون بنجاح**\n🎁 حصلت على `+{reward} نقطة` لرصيدك.")
-        else:
-            # إذا كتب رسالة عادية وليست كوبون
-            pass
 
-# --- أمر خاص للأدمن لإنشاء كوبونات (مثال: /addcoupon MOHA 500) ---
 @dp.message(Command("addcoupon"))
 async def add_coupon(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -275,7 +270,6 @@ async def add_coupon(message: types.Message):
         await db.commit()
     await message.reply(f"✅ تم إنشاء الكوبون `{code}` بقيمة `{reward}` نقطة بنجاح!", parse_mode="Markdown")
 
-# --- 8. سحب الأرباح ---
 @dp.callback_query(F.data == "request_withdraw")
 async def request_withdraw(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -296,7 +290,8 @@ async def request_withdraw(callback: types.CallbackQuery):
 
 async def main():
     await init_db()
-    await dp.start_polling(bot)
+    # تشغيل خادم الويب والبوت معاً في نفس الوقت لتجنب مشاكل Render
+    await asyncio.gather(web_server(), dp.start_polling(bot))
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
