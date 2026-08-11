@@ -4,18 +4,18 @@ import telebot
 from flask import Flask
 from threading import Thread
 
-# إنشاء سيرفر وهمي لفتح المنفذ المطلوب على Render
+# سيرفر وهمي لإرضاء Render وفتح المنفذ
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is alive!"
+    return "Bot is active!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# إعداد البوت
+# إعدادات البوت والـ API
 TELEGRAM_TOKEN = "7344257430:AAGnlTxGH_AZ0B9S7bNX6ZRg8H02XU4lSuM"
 RAPIDAPI_KEY = "30481209aamsh58e0e818f3fa36ep17b90djsnc143a17a1931"
 
@@ -33,29 +33,38 @@ def download_tiktok(message):
         bot.reply_to(message, "⚠️ من فضلك أرسل رابط تيك توك صحيح.")
         return
 
-    bot.reply_to(message, "⏳ جاري جلب الفيديو بدون علامة مائية...")
-
-    api_url = "https://tiktok-downloader-download-tiktok-videos-without-watermark.p.rapidapi.com/index"
-    headers = {
-        "x-rapidapi-key": RAPIDAPI_KEY,
-        "x-rapidapi-host": "tiktok-downloader-download-tiktok-videos-without-watermark.p.rapidapi.com"
-    }
-    querystring = {"url": url_text}
+    msg = bot.reply_to(message, "⏳ جاري جلب الفيديو بدون علامة مائية...")
 
     try:
-        response = requests.get(api_url, headers=headers, params=querystring, timeout=10)
-        data = response.json()
-        
-        video_url = data.get("video", [None])[0] or data.get("download_url")
+        # فك الرابط المختصر للحصول على الرابط الكامل
+        res = requests.head(url_text, allow_redirects=True, timeout=5)
+        full_url = res.url
 
-        if video_url:
+        api_url = "https://tiktok-downloader-download-tiktok-videos-without-watermark.p.rapidapi.com/index"
+        headers = {
+            "x-rapidapi-key": RAPIDAPI_KEY,
+            "x-rapidapi-host": "tiktok-downloader-download-tiktok-videos-without-watermark.p.rapidapi.com"
+        }
+        querystring = {"url": full_url}
+
+        response = requests.get(api_url, headers=headers, params=querystring, timeout=12)
+        data = response.json()
+
+        # استخراج رابط الفيديو المباشر بمختلف صيغ الاستجابة المحتملة
+        video_url = None
+        if isinstance(data, dict):
+            video_url = data.get("video") or data.get("download_url") or data.get("no_watermark")
+            if isinstance(video_url, list) and len(video_url) > 0:
+                video_url = video_url[0]
+
+        if video_url and str(video_url).startswith("http"):
             bot.send_video(message.chat.id, video_url, caption="✅ تم التحميل بنجاح بدون علامة مائية!")
         else:
-            bot.reply_to(message, "❌ تعذر جلب الفيديو، تأكد من أن الحساب ليس خاصاً.")
-    except Exception as e:
-        bot.reply_to(message, "⚠️ حدث خطأ أثناء الاتصال بالسيرفر، حاول مجدداً.")
+            bot.edit_message_text("❌ تعذر استخراج الفيديو، تأكد من صحة الرابط أو جرب رابطاً آخر.", chat_id=message.chat.id, message_id=msg.message_id)
 
-# تشغيل السيرفر والبوت معاً
+    except Exception as e:
+        bot.edit_message_text("⚠️ حدث خطأ أثناء الاتصال بالخادم، حاول مجدداً لاحقاً.", chat_id=message.chat.id, message_id=msg.message_id)
+
 if __name__ == "__main__":
     t = Thread(target=run_web)
     t.start()
