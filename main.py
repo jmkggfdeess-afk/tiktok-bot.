@@ -3,24 +3,25 @@ import requests
 import telebot
 from flask import Flask
 from threading import Thread
-from yt_dlp import YoutubeDL
 
+# سيرفر وهمي لإبقاء الخدمة نشطة على Render
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is online!"
+    return "Bot is active!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
+# توكن البوت
 TELEGRAM_TOKEN = "7344257430:AAGnlTxGH_AZ0B9S7bNX6ZRg8H02XU4lSuM"
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "👋 أهلاً بك! أرسل لي أي رابط فيديو من تيك توك وسأقوم بتحميله لك فوراً 🎬")
+    bot.reply_to(message, "👋 أهلاً بك! أرسل لي أي رابط فيديو من تيك توك وسأقوم بتحميله لك فوراً وبدون علامة مائية 🎬")
 
 @bot.message_handler(func=lambda message: True)
 def download_tiktok(message):
@@ -30,45 +31,47 @@ def download_tiktok(message):
         bot.reply_to(message, "⚠️ من فضلك أرسل رابط تيك توك صحيح.")
         return
 
-    msg = bot.reply_to(message, "⏳ جاري تحميل الفيديو...")
+    msg = bot.reply_to(message, "⏳ جاري تحميل الفيديو بدون علامة مائية...")
 
-    # الطرق المعتمدة للتحميل لتفادي حظر السيرفرات
-    ydl_opts = {
-        'format': 'best',
-        'outtmpl': 'video.mp4',
-        'quiet': True,
-        'no_warnings': True,
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
 
     try:
-        # المحاولة الأولى: yt-dlp محاكي للمتصفح
-        with YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url_text])
+        # استخدام TikWM API لتخطي حماية وسيرفرات تيك توك مباشرة
+        api_url = f"https://www.tikwm.com/api/?url={url_text}"
+        response = requests.get(api_url, headers=headers, timeout=15).json()
 
-        if os.path.exists('video.mp4'):
-            with open('video.mp4', 'rb') as video:
-                bot.send_video(message.chat.id, video, caption="✅ تم التحميل بنجاح!")
-            os.remove('video.mp4')
-            bot.delete_message(chat_id=message.chat.id, message_id=msg.message_id)
-            return
-    except Exception:
-        if os.path.exists('video.mp4'):
-            os.remove('video.mp4')
+        if response.get("code") == 0 and "data" in response:
+            video_data = response["data"]
+            # رابط الفيديو بدون علامة مائية
+            play_url = video_data.get("play") or video_data.get("wmplay")
+            
+            if play_url:
+                # إضافة السيرفر كمصدر للرابط عند الحاجة
+                if not play_url.startswith("http"):
+                    play_url = "https://www.tikwm.com" + play_url
 
-    # المحاولة الثانية (الخيار الاحتياطي في حال حظر تيك توك للسيرفر):
-    try:
-        api_res = requests.get(f"https://api.tiklydown.eu.org/api/download?url={url_text}", timeout=10).json()
-        video_url = api_res.get("video", {}).get("noWatermark") or api_res.get("video", {}).get("watermark")
-        
-        if video_url:
-            bot.send_video(message.chat.id, video_url, caption="✅ تم التحميل بنجاح!")
-            bot.delete_message(chat_id=message.chat.id, message_id=msg.message_id)
-            return
-    except Exception:
-        pass
+                bot.send_video(
+                    message.chat.id, 
+                    play_url, 
+                    caption="✅ تم التحميل بنجاح بدون علامة مائية!"
+                )
+                bot.delete_message(chat_id=message.chat.id, message_id=msg.message_id)
+                return
 
-    bot.edit_message_text("❌ تعذر تحميل هذا الفيديو حالياً، جرب إرسال الرابط مرة أخرى.", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text(
+            "❌ تعذر تحميل الفيديو. تأكد من أن الرابط صحيح وأن الحساب ليس خاصاً.", 
+            chat_id=message.chat.id, 
+            message_id=msg.message_id
+        )
+
+    except Exception as e:
+        bot.edit_message_text(
+            "⚠️ حدث خطأ في الاتصال، يرجى إعادة محاولة إرسال الرابط مرة أخرى.", 
+            chat_id=message.chat.id, 
+            message_id=msg.message_id
+        )
 
 if __name__ == "__main__":
     t = Thread(target=run_web)
