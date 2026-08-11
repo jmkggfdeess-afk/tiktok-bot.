@@ -1,7 +1,21 @@
 import os
 import requests
 import telebot
+from flask import Flask
+from threading import Thread
 
+# إنشاء سيرفر وهمي لفتح المنفذ المطلوب على Render
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+# إعداد البوت
 TELEGRAM_TOKEN = "7344257430:AAGnlTxGH_AZ0B9S7bNX6ZRg8H02XU4lSuM"
 RAPIDAPI_KEY = "30481209aamsh58e0e818f3fa36ep17b90djsnc143a17a1931"
 
@@ -41,4 +55,8 @@ def download_tiktok(message):
     except Exception as e:
         bot.reply_to(message, "⚠️ حدث خطأ أثناء الاتصال بالسيرفر، حاول مجدداً.")
 
-bot.infinity_polling()
+# تشغيل السيرفر والبوت معاً
+if __name__ == "__main__":
+    t = Thread(target=run_web)
+    t.start()
+    bot.infinity_polling()
